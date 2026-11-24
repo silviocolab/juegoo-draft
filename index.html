@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Draft 7 a 0</title>
+<style>
+:root{--cielo:#bfe3f6;--azul:#0d2b52;--sol:#f6b40e}
+*{box-sizing:border-box}body{margin:0;background:var(--cielo);color:var(--azul);font:16px/1.5 system-ui,sans-serif}
+main{max-width:860px;margin:auto;padding:16px}
+h1{font:900 clamp(2rem,7vw,3.4rem)/1 "Arial Black",Impact,sans-serif;margin:.3em 0}
+.card{background:#fff;border-left:8px solid var(--sol);border-radius:4px;padding:14px 18px;margin:14px 0}
+button{background:var(--azul);color:#fff;border:0;border-radius:4px;padding:8px 14px;font:inherit;font-weight:700;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}button:focus-visible,input:focus-visible{outline:3px solid var(--sol);outline-offset:2px}
+input{padding:8px;border:2px solid var(--azul);border-radius:4px;margin:4px 4px 4px 0;font:inherit}
+.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.j{background:#fff;color:var(--azul);border:2px solid var(--azul);text-align:left}.j:hover{background:var(--sol)}
+.err{background:#fff;color:#b00020;padding:8px 12px;border-radius:4px;font-weight:700}
+</style></head><body><main id="app">
+<h1>Draft 7 a 0</h1>
+<p class="err" v-if="msg">{{msg}}</p>
+<div class="card" v-if="!user">
+  <h3>Entrá para jugar</h3>
+  <input v-model="alias" placeholder="Alias" autocomplete="username"><input v-model="pass" type="password" placeholder="Contraseña (8 o más)" autocomplete="current-password">
+  <button @click="auth('login')">Ingresar</button> <button @click="auth('registro')">Crear cuenta</button>
+</div>
+<template v-else>
+  <p>Jugás como <b>{{user.alias}}</b> <button @click="salir">Salir</button></p>
+  <div class="card" v-if="fase==='draft' && equipo">
+    <h3>{{equipo.pais}} {{equipo.anio}}: elegí un jugador (te faltan {{faltan}})</h3>
+    <p>Formación 4-3-3. Te quedan {{rolls}} tiradas. <button :disabled="!rolls" @click="tirar(true)">Volver a tirar</button></p>
+    <div class="g"><button class="j" v-for="p in disponibles" :key="p.id" @click="elegir(p)">{{p.posicion}} {{p.nombre}}<br>Rating {{p.rating}}</button></div>
+    <p>Tu equipo: {{elegidos.map(p=>p.nombre).join(', ') || 'todavía vacío'}}</p>
+  </div>
+  <div class="card" v-if="fase==='sim'">
+    <h3>{{perfecto ? '¡7 a 0! Campeón sin recibir goles' : 'Terminó tu Mundial'}}: {{puntos}} puntos</h3>
+    <p v-for="r in res">{{r}}</p>
+    <p>{{guardado ? 'Partida guardada.' : 'Guardando…'}}</p>
+    <button @click="nuevo">Jugar de nuevo</button>
+  </div>
+  <div class="card"><h3>Ranking</h3>
+    <p v-if="!ranking.length">Todavía no hay partidas. Terminá un Mundial para abrirlo.</p>
+    <ol><li v-for="r in ranking" :key="r.usuarioId">{{r.alias}}: {{r.puntos}}</li></ol></div>
+  <div class="card" v-if="user.rol==='admin'"><h3>Partidas guardadas (admin)</h3>
+    <p v-if="!partidas.length">No hay partidas guardadas.</p>
+    <ul><li v-for="p in partidas" :key="p.id">#{{p.id}} {{p.alias}}: {{p.puntos}} puntos <button @click="borrar(p.id)">Borrar</button></li></ul></div>
+</template>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js"></script>
+<script>
+Vue.createApp({
+data:()=>({user:null,alias:'',pass:'',msg:'',equipos:[],equipo:null,rolls:3,elegidos:[],fase:'draft',t0:0,res:[],puntos:0,perfecto:false,guardado:false,ranking:[],partidas:[],juegoId:1}),
+computed:{faltan(){return 11-this.elegidos.length},disponibles(){return this.disp(this.equipo)}},
+methods:{
+ async api(url,op){const r=await fetch('api/'+url,op);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Error del servidor');return d},
+ post(url,data){return this.api(url,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':(this.user&&this.user.csrf)||''},body:JSON.stringify(data)})},
+ async auth(a){try{this.user=await this.post('auth.php?accion='+a,{alias:this.alias,password:this.pass});this.msg='';this.pass='';await this.iniciar()}catch(e){this.msg=e.message}},
+ async salir(){await this.api('auth.php?accion=logout');this.user=null},
+ cupo(pos){return{ARQ:1,DEF:4,MED:3,DEL:3}[pos]-this.elegidos.filter(x=>x.posicion===pos).length},
+ disp(eq){return eq?eq.jugadores.filter(p=>this.cupo(p.posicion)>0&&!this.elegidos.some(x=>x.id===p.id)):[]},
+ tirar(gasta){if(gasta){if(!this.rolls)return;this.rolls--}let e;do{e=this.equipos[Math.floor(Math.random()*this.equipos.length)]}while(!this.disp(e).length);this.equipo=e},
+ elegir(p){this.elegidos.push(p);if(this.elegidos.length===11)this.simular();else this.tirar(false)},
+ async iniciar(){const eq=await this.api('equipos.php');this.equipos=eq.map(e=>({...e,jugadores:e.jugadores.map(p=>({...p,rating:+p.rating}))}));this.nuevo();this.cargarRanking()},
+ nuevo(){this.elegidos=[];this.rolls=3;this.fase='draft';this.res=[];this.guardado=false;this.t0=Date.now();this.tirar(false)},
+ pois(l){const L=Math.exp(-l);let k=0,p=1;do{k++;p*=Math.random()}while(p>L);return k-1},
+ prom(js){return js.reduce((s,p)=>s+p.rating,0)/js.length},
+ async simular(){
+  const mi=this.prom(this.elegidos),fases=['Grupo 1','Grupo 2','Grupo 3','Octavos','Cuartos','Semifinal','Final'];
+  const riv=[...this.equipos].sort(()=>Math.random()-.5);let gf=0,gc=0,vic=0;this.res=[];this.perfecto=false;
+  for(let i=0;i<7;i++){
+   const r=riv[i%riv.length],rr=this.prom(r.jugadores);
+   const a=this.pois(1.4*Math.exp((mi-rr)/15)),b=this.pois(1.4*Math.exp((rr-mi)/15));
+   let gana=a>b,pen='';if(a===b&&i>=3){gana=Math.random()<.5;pen=' (penales)'}
+   gf+=a;gc+=b;if(gana)vic++;
+   this.res.push(`${fases[i]}: ${a} a ${b} vs ${r.pais} ${r.anio}${pen}`);
+   if(!gana&&i>=3)break;
+  }
+  this.puntos=Math.max(0,vic*100+(gf-gc)*5);this.perfecto=vic===7&&gc===0;this.fase='sim';
+  try{await this.post('partidas.php',{juegoId:this.juegoId,puntos:this.puntos,duracionSegundos:Math.max(1,Math.round((Date.now()-this.t0)/1000))});
+   this.guardado=true;this.msg='';await this.cargarRanking()}catch(e){this.msg='No se pudo guardar la partida: '+e.message}
+ },
+ async cargarRanking(){try{this.ranking=await this.api('ranking.php?juegoId='+this.juegoId);if(this.user&&this.user.rol==='admin')this.partidas=await this.api('partidas.php?juegoId='+this.juegoId)}catch(e){this.msg=e.message}},
+ async borrar(id){if(!confirm('¿Borrar la partida #'+id+'?'))return;try{await this.api('partidas.php?id='+id,{method:'DELETE',headers:{'X-CSRF-Token':this.user.csrf}});this.msg='';await this.cargarRanking()}catch(e){this.msg=e.message}}
+},
+async mounted(){try{this.user=await this.api('auth.php?accion=me');await this.iniciar()}catch(e){}}
+}).mount('#app');
+</script>
+</body></html>

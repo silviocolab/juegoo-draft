@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ranking 7 a 0</title>
+<style>
+body{margin:0;background:#bfe3f6;color:#0d2b52;font:20px/1.6 system-ui,sans-serif}
+main{max-width:640px;margin:auto;padding:20px}
+h1{font:900 clamp(2rem,8vw,3.6rem)/1 "Arial Black",Impact,sans-serif}
+ol{background:#fff;border-left:8px solid #f6b40e;border-radius:4px;padding:14px 14px 14px 48px}
+input{width:4em;padding:4px;font:inherit;border:2px solid #0d2b52;border-radius:4px}
+#estado{font-weight:700}
+</style></head><body><main>
+<h1>Ranking 7 a 0</h1>
+<p>Juego <input id="juego" type="number" min="1" value="1"> <span id="estado">Conectando…</span></p>
+<p id="vacio" hidden>Todavía no hay partidas para este juego.</p>
+<ol id="lista"></ol>
+</main>
+<script>
+// Si el visor se sirve desde otro origen, usá la dirección del servidor, por ejemplo:
+// const API = 'http://192.168.1.50/draft7a0/api/';  (y agregá ese origen en $permitidos de api/db.php)
+const API = '../api/';
+// Con proxy HTTPS en Apache usá: 'wss://' + location.host + '/ws'
+const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':8081';
+let juegoId = 1, ws, intento = 0, cerrado = false, timer;
+
+async function cargar() {
+  try {
+    const r = await fetch(API + 'ranking.php?juegoId=' + juegoId);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Error del servidor');
+    lista.replaceChildren(...d.map(x => { const li = document.createElement('li'); li.textContent = x.alias + ': ' + x.puntos; return li; }));
+    vacio.hidden = d.length > 0;
+  } catch (e) { lista.replaceChildren(); vacio.hidden = true; estado.textContent = 'No se pudo cargar: ' + e.message; }
+}
+function suscribir() { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ tipo: 'suscribir', juegoId })); }
+function conectar() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => { intento = 0; estado.textContent = 'En vivo'; suscribir(); cargar(); };  // recarga: pudieron perderse avisos
+  ws.onmessage = e => { try { const m = JSON.parse(e.data); if (m.tipo === 'rankingActualizado' && m.juegoId === juegoId) cargar(); } catch {} };
+  ws.onclose = () => { if (cerrado) return; estado.textContent = 'Reconectando…'; timer = setTimeout(conectar, Math.min(1000 * 2 ** intento++, 15000)); };
+}
+juego.onchange = () => { juegoId = +juego.value || 1; suscribir(); cargar(); };
+addEventListener('pagehide', () => { cerrado = true; clearTimeout(timer); if (ws) ws.close(); });
+cargar(); conectar();
+</script></body></html>

@@ -1,0 +1,1 @@
+{"name":"draft7a0-ws","private":true,"scripts":{"start":"node server.js"},"dependencies":{"ws":"^8.18.0"}}
